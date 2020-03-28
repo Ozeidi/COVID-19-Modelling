@@ -1,0 +1,320 @@
+---
+title: 'Webinar: Modelling COVID-19 Outbreak in R'
+author: "Omar"
+date: "28 March 2020"
+output: html_document#ioslides_presentation
+---
+By: Omar Al Zeidi
+
+## What will you get from the next hour:
+
+1. Introduction to Pandemic Outbreak Modelling in R
+2. Will be able to simulate and generate graphs prediting COVID-19 Spread
+3. Explore and play with Shiny App for running COVID-19 Simulations
+
+
+![Source: Siouxsie Wiles and Toby Morris](img/Covid-19-curves-graphic-social-v3.gif){width=250px,height=50px}
+
+## Introduction:
+There are several models for simulating pandemic breakout, the simplest of them is what is refered to SIR Dynamic Compartment Model (DCM).  
+Lets assume we are in a village that has a population of 1000 people, where 5 people got infected and none of them have recoverd yet. DCM model splits them into three compartments:  
+  
+  
+1. **Susceptible Compartment** $S(t)$: Total of susceptible who have not got the infection yet (In our case 995).  
+  
+2. **Infected Compartment** $I(t)$: Total number of people who are currently infected (In our case 5). n Epidemology, this usually refered to as the *Disease Prevalence*.  
+  
+3. **Recovered Compartment** $R(t)$: Total number of people recoverd from the infection (In our case 0).  
+
+![DCM Standard Compartments, Source: Wikipedia \label{fig1}](img//SIR.PNG)    
+<br />
+<br />
+
+## Modeling Compartments Dyanmic
+
+<br />
+To model the dyanmics of these compartments -and predict how the numbers will change-, we will need to introduce inflows/outflow reates from/to each compartment.  
+For simplicity purpose, lets assume three flows:  
+<br />
+1. **Susceptible-to-Infected Rate** : Number of newlly infected people per unit of time. In Epidemology, this usually refered to as the *Disease Incidence*.  
+<br />
+2. **Infected-to-Recovered Rate** : Number of people recovering from the infection per unit of time.  
+<br />
+3. **Infected Death Rate**: Number of People who die from the infetion per unit of time.  
+
+> Note: On longer-term models we can consider three additional rates representing the birth rate in the population and the mortality rate for the Susceptible and Recoverd compartments. For the sake of simplicity we will set those to zero and assume constant population headcount.
+
+
+![Rates of change for model compartments \label{fig3}](img/Model Diagram.png) 
+
+## Mathmatical Setting:
+The above setting of compartments and rates of change system, can be expressed in three diffrential equations first derived by first derived by Kermack and McKendrick [Proc. R. Soc. A, 115, 772 (1927)]:  
+\begin{align*}
+\frac{\mathrm{d}S}{\mathrm{d}t} &= -\frac{\beta S I}{N},\\
+\frac{\mathrm{d}I}{\mathrm{d}t} &= \frac{\beta S I}{N} - \gamma I,\\
+\frac{\mathrm{d}R}{\mathrm{d}t} &= \gamma I.
+\end{align*}  
+
+These three queation describe the change in the population of each compartment using two parameters $\beta$ and $\gamma$:  
+* $\beta$ describes the effective contact rate of the disease.  
+* $\gamma$ describes the mean average recovery time of an infected person. This is expressed as the reciprocal of the recovery time.  
+* N = Total population.  
+
+We can model the outbreak of an infectious disease by solving the system of three ordinary differential equations (ODEs) above. Here we will make use of the EpiModel package ^[EpiModel: An R Package for Mathematical Modeling of Infectious Disease over Networks.
+Jenness, S., Goodreau, S. and Morris, M., 2018. Journal of Statistical Software, Vol 84(8), pp. 1-47. DOI: 10.18637/jss.v084.i08] , developed by a research group at the Rollins School of Public Health, Emory University.  
+
+## Introduction to EpiModel
+`EpiMODEL` developed by a research group at the Rollins School of Public Health, Emory University, lead by Samuel Jenness. Although, we wil be using the DCM model only, it is worth mentioning that the package has 2 other advanced models:  
+* stochastic, discrete-time, individual contact models (ICMs)  
+* stochastic, discrete-time, network models  
+Let's load the package first.
+```{r}
+# Load EpiModel
+suppressMessages(library(EpiModel))
+```
+
+DCM epidicmic simultion can be runn using the `dcm()` function which taks three key parameters:  
+*`param.dcm()`: specifies the model and pandemic parameters.  
+*`init.dcm()`: specifies the initial compartments population.  
+*`control.dcm()`: specified the simulation control parameters.    
+
+### `param.dcm()`:  
+This function specifies the model and epedimic parameters including :  
+* `act.rate`: The rate at which susceptible individuals are exposed to potential infection per unit of time (day). In our case of COVID-19, this could be a hand-shake with infected person or touching contaminated surface. We assume a person is exposed 10 times a day. 
+
+* `inf.prob`: the probability of getting infection at each each exposure occasion above. Will assume 5% of of the exposure acts get infected.
+
+* `rec.rate`: the mean probability of transition from infected to recovered compartment per individual per unit of time. In non-probabilitstic terms this can be refered to as the recovery rate and is always expressed as the reciprocal of the average recover time. I we assume COVID-19 patient takes 20 days to recover, this parameter will be (1/20)
+
+* `ds.rate, di.rate, dr.rate`: these parameters are refered to as the departure rates per comparment. We are particular interested in the `di.rate` which can be considered as the fatality rate of infected individuals, while the other two parameters will be set to zero. In oman the crude death rate ^[https://www.ncsi.gov.om/Pages/IndicatorDetails.aspx?ItemID=MJ%2bgntjIQ7fU7YIFKh8AnQ%3d%3d] has been around 2.8 deaths/1000 people / year. Let's assume this doubled for the infected compartment. Hence, we set `di.rate` = (di.rate).  
+
+* `a.rate`: the arrival rate reflecting new births. For the sake of simplicity and since we run short simulation we will set this to zero.  
+
+
+### `dcm.init()`:  
+This fuction sets the initial states of the compartment, ie the population of each comparment:  
+* `s.num`: Susceptible population headcount.  
+* `i.num`:  Infected population headcount.  
+* `r.num`:  Recovered population headocunt.  
+
+
+### `control.dcm()`:  
+This sets the control parametrs of the Simulation and the type of model to be used:  
+* `type`: type of model. We will be using "SIR" for Susceptible-Infected-Recovered diseases. SIS and SI models are available.  
+* `nsteps`: simulation duration. we will run our basic simulation for one year (365 days).  
+* `dt`: time steps resolution. We will run at half day resolution.  
+
+
+Now that we know all the parameters required to run the simultion, Let's Play
+##### Installing and loading some of the key packages
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+list.of.packages <- c("tidyverse","magrittr","EpiModel", "extrafont", "animation")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+print(c("Following Packages to be installed", paste0(new.packages,collapse = ", ")))
+if(length(new.packages)) install.packages(new.packages)
+
+lapply(list.of.packages, require, character.only = TRUE)
+```
+
+
+
+
+
+
+
+
+
+
+### Running Simulations:
+#### Simple Simulaiton
+Simple Pandemic breakout model
+
+```{r}
+di.rate <- 5.6/1000/365
+# Model Parameters
+param <- param.dcm(inf.prob = 0.05, act.rate = 10, rec.rate = 1/20,
+                   a.rate = 0, ds.rate = 0, di.rate = di.rate, dr.rate = 0)
+
+# Model Initial State
+init <- init.dcm(s.num = 995, i.num = 5, r.num = 0)
+# Simulation Control Parameters
+control <- control.dcm(type = "SIR", nsteps = 365, dt = 0.5)
+
+mod <- dcm(param, init, control)
+```
+
+
+
+
+
+
+
+
+Plotting the simulation results. What do you notice here?  
+In less than 50 days, COVID-19 will reach maximum prevalence in our small community of 1000 people.Is it realistic? Unlikely, because this simulation does not consider the social distancing measure yet.
+```{r}
+plot(mod, popfrac = F, alpha = 0.5,
+     lwd = 4, main = "Compartment Sizes")
+```
+
+
+
+
+Plotting Pandemic Prevalence and Incidence side by side
+```{r}
+#Plotting Results
+par(mar = c(3.2, 3, 2, 1), mgp = c(2, 1, 0), mfrow = c(1, 2))
+plot(mod, popfrac = FALSE, alpha = 0.5,
+     lwd = 4, main = "Compartment Sizes")
+plot(mod, y = "si.flow", lwd = 4, col = "firebrick",
+     main = "Disease Incidence \n (Infected Per Day)", legend = "n")
+par(mfrow = c(1, 1))
+
+```
+
+We also can visualize the inflow out flow from the model compartments
+```{r}
+comp_plot(mod, at = 1, digits = 1)
+comp_plot(mod, at = 20, digits = 1)
+```
+
+### Sensitivity Analysis
+
+#### Social Distancing
+Most of the effort in controling COVI-19 outbreak relay on social distancing as a key measure to control the spread and "delay the hump". Lets conduct some sensitivity on social distancing and see how long does it take to reach maximum prevalence.
+We can do so by changing the `act.rate` parameter which represent the rate at which susceptible individuals are exposed to potential infection from 0 (Complete Lock-Down) to 10 (Normal life with no social distancing).
+
+
+```{r}
+# Model Parameters
+act.rates <- seq(10,0,-2)
+param <- param.dcm(inf.prob = 0.05, act.rate = act.rates, rec.rate = 1/20,
+                   a.rate = 0, ds.rate = 0, di.rate = di.rate, dr.rate = 0)
+
+# Model Initial State
+init <- init.dcm(s.num = 995, i.num = 5, r.num = 0)
+# Simulation Control Parameters
+control <- control.dcm(type = "SIR", nsteps = 365, dt = 0.5)
+
+mod <- dcm(param, init, control)
+
+#par(mfrow = c(1,2), mar = c(3.2,3,2.5,1))
+
+plot(mod, alpha = 1, col= 'YlOrRd',  main = "Disease Prevalence",legend = "full")
+
+plot(mod, y = "si.flow", col = "YlOrRd", alpha = 0.8, main = "Disease Incidence")
+```
+#### Improved Hygiene measures
+One of the other key measures in controling COVID-19 spread is improving hygiene measures. This include things like:  
+* Washing hands regulary  
+* Wearing face mask  
+* Not touching your face and mouth  
+* Cleaning and disinfecting surfaces  
+
+In our model these practices can be simulated by changing the probability of infetion from exposures `inf.prob`. We will vary this from 5% to 1% for the sake of sensitivity.
+
+```{r}
+# Model Parameters
+inf.probs <- seq(.05,.01,-.01)
+param <- param.dcm(inf.prob = inf.probs, act.rate = 10, rec.rate = 1/20,
+                   a.rate = 0, ds.rate = 0, di.rate = di.rate, dr.rate = 0)
+
+# Model Initial State
+init <- init.dcm(s.num = 995, i.num = 5, r.num = 0)
+# Simulation Control Parameters
+control <- control.dcm(type = "SIR", nsteps = 365, dt = 0.5)
+
+mod <- dcm(param, init, control)
+
+#par(mfrow = c(1,2), mar = c(3.2,3,2.5,1))
+
+plot(mod, alpha = 1, col= 'YlOrRd',  main = "Disease Prevalence",legend = "full")
+
+plot(mod, y = "si.flow", col = "YlOrRd", alpha = 0.8, main = "Disease Incidence")
+```
+
+
+## Modelling an outbreak in Muscat.
+As per the latest number from MOH, there were 107 confirmed cases in Muscat up to date. Lets assume the total population of Musat is ~ 1 Million and try to see the outbreak scenarios.
+
+```{r}
+
+
+#
+# Varying act.rate (Average number of transmissible acts per person per unit time)
+#
+pop <- 1000000
+
+
+init <- init.dcm(s.num = pop, i.num =90, r.num = 17)
+control <- control.dcm(type = "SIR", nsteps = 365, dt = 0.5)
+
+
+
+# Run simulations and draw lines.
+mod.df <- list()
+i <- 1
+act.rates <- seq(10, 2, by=-2)
+for (rt in act.rates) {
+
+    param <- param.dcm(inf.prob = 0.05, act.rate = rt, rec.rate = 1/20,
+                       a.rate = 0, ds.rate = 0, di.rate =di.rate , dr.rate = 0)
+    mod <- dcm(param, init, control)
+    mod.df[[i]]<- as.data.frame(mod)[,c(1:4)]
+    i=i+1
+
+}
+names(mod.df) <- as.factor(act.rates)
+
+mod.df.b <- bind_rows(mod.df, .id='trans.rate')
+mod.df.b$trans.rate <- (as.factor(mod.df.b$trans.rate))
+
+
+g <- ggplot() +theme_bw()+theme(legend.position = "none" ,panel.border = element_blank(),
+                                panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Time Since First Case")+ ylab("Number Infected")+
+  ggtitle(" Social Distancing Scenarios Sensitivity")
+
+
+# Sensitivity Curves
+g +geom_line(data = mod.df.b,aes(x= time, y=i.num,  color=rgb(158/255,158/255,161/255), group = (trans.rate), alpha=rev(trans.rate)),
+                  size= .1, linetype = "solid")+
+  #scale_color_brewer(palette  ="Set1")+
+# Selected Scenraios with
+ geom_line(data = mod.df.b[mod.df.b$trans.rate == last(mod.df.b$trans.rate),],aes(x= time, y=i.num,  color=rgb(85/255,158/255,161/255)),size= 1.0, linetype = "solid")+
+  geom_hline(aes(yintercept = 5027), linetype = "dashed")+
+  geom_text(aes(x=250, y= 5027, label = "Oman Health Care Capacity \n Number of Beds", vjust = -.2), size =3)
+
+
+# mys cenario plot
+mydf <- mod.df.b %>% filter(trans.rate== last(trans.rate)) %>%  select(c(2:5)) %>%  rename("Susciptilbe" = s.num, "Infected" = i.num, "Recovered" = r.num) %>%
+  gather(variable ,total, 2:4, factor_key = T)
+mydf %<>% mutate(total = total / pop*100)
+
+
+line_col <- c("Susciptilbe" = "orange", "Infected" ="red", "Recovered" = "green")
+ggplot(mydf) +theme_bw()+theme(legend.position = "bottom" ,panel.border = element_blank(),
+                                panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  xlab("Time Since First Case")+ ylab("Percentage (%)")+
+  geom_line(aes(x=time, y=total, group = variable, colour = variable))+
+  scale_color_manual(values = line_col)
+
+
+
+```
+
+### Interactive Scenarios
+![Web Application \label{fig3}](img/WebApp.png) 
+To check the effect of changing the model parameters on the simulation results, we can leverage on the capabilities of `R shiny` package which enables us to build an interactive web application to play with simulation.
+I create a sample web application which can be found on my [Github Account!](https://github.com/Ozeidi).
+A live version is available at [this link!](https://ozeidi.shinyapps.io/COVID19/), hosted on Shinyapp.io.
+
+
+ 
+
+### References:
+* The official website for `EpiMODEL` package. THis has an excellent tutroials: http://www.epimodel.org/index.html  
+* A great tutorial on how to build SIR DCM in Python :https://scipython.com/book/chapter-8-scipy/additional-examples/the-sir-epidemic-model/  
+*Tim Church GitHub Blog. Time is an avid blogger specialised in Health Data Science. A highly reomended resourse. https://timchurches.github.io/blog/
+
